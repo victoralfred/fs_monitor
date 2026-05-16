@@ -71,15 +71,13 @@ class Conn:
 @dataclass
 class ConnectionLog:
     """`(pid, raddr_with_port, proto)` → Conn. Stale entries pruned by max_age."""
+
     max_age: float = 600.0    # 10 min — long enough to spot a "what was that?"
+    enricher: object | None = None  # Enricher, but Enricher imports nothing from us
     seen: dict[tuple, Conn] = field(default_factory=dict)
     _lock: Lock = field(default_factory=Lock, repr=False, compare=False)
 
     def update(self, conns: list[Conn]) -> None:
-        # Import here to avoid a circular dep at module load (enrichment
-        # is independent but imported by app.py too).
-        from .enrichment import ENRICHER
-
         now = time.time()
         with self._lock:
             for c in conns:
@@ -94,11 +92,12 @@ class ConnectionLog:
                     existing.state = c.state
         # Outside the lock: kick enrichment for the remote IPs we just saw.
         # First call returns empty; the background lookup populates the
-        # cache. The next CONNECTIONS.items() call picks the enrichment up.
-        for c in conns:
-            if c.external:
-                ip = c.raddr.split(":", 1)[0].strip("[]")
-                ENRICHER.enrich(ip)
+        # cache. The next items() call picks the enrichment up.
+        if self.enricher is not None:
+            for c in conns:
+                if c.external:
+                    ip = c.raddr.split(":", 1)[0].strip("[]")
+                    self.enricher.enrich(ip)
 
     def prune(self) -> None:
         now = time.time()
@@ -108,30 +107,25 @@ class ConnectionLog:
                     del self.seen[key]
 
     def items(self, external_only: bool = True) -> list[dict]:
-        from .enrichment import ENRICHER
-
         with self._lock:
             rows = [asdict(c) for c in self.seen.values()]
         if external_only:
             rows = [r for r in rows if r["external"]]
         # Attach the latest enrichment snapshot just before serializing.
-        for r in rows:
-            if r["external"]:
-                ip = r["raddr"].split(":", 1)[0].strip("[]")
-                e = ENRICHER.enrich(ip)
-                r["ptr"] = e.ptr
-                r["asn"] = e.asn
-                r["asn_org"] = e.asn_org
+        if self.enricher is not None:
+            for r in rows:
+                if r["external"]:
+                    ip = r["raddr"].split(":", 1)[0].strip("[]")
+                    e = self.enricher.enrich(ip)
+                    r["ptr"] = e.ptr
+                    r["asn"] = e.asn
+                    r["asn_org"] = e.asn_org
         rows.sort(key=lambda r: r["last_seen"], reverse=True)
         return rows
 
     def count_external(self) -> int:
         with self._lock:
             return sum(1 for c in self.seen.values() if c.external)
-
-
-# Single global instance shared with the scanner.
-CONNECTIONS = ConnectionLog()
 
 
 def _proto_str(family, type_) -> str:

@@ -1,4 +1,4 @@
-from monitor.netwatch import CONNECTIONS, Conn, ConnectionLog, is_external
+from monitor.netwatch import Conn, ConnectionLog, is_external
 
 
 def test_is_external_loopback():
@@ -81,9 +81,10 @@ def test_connection_log_items_filters_external():
     assert len(all_rows) == 2
 
 
-def test_global_connections_is_singleton():
-    # Sanity check: the module-level singleton is the same object the
-    # scanner / app code references.
-    from monitor import netwatch as nw
-
-    assert nw.CONNECTIONS is CONNECTIONS
+def test_connection_log_constructs_independently():
+    # Phase 11: there's no more module-level singleton; each AppState
+    # owns its own ConnectionLog. Two instances must be independent.
+    a = ConnectionLog()
+    b = ConnectionLog()
+    assert a is not b
+    assert a.seen is not b.seen

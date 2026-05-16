@@ -139,4 +139,3 @@ class FsAggregator:
                     self.by_pid_comm.pop(pid, None)
 
 
-FS = FsAggregator()

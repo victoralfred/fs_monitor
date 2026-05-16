@@ -320,10 +320,11 @@ def classify_external_egress_from_suspicious(
     exe_link: str | None,
     pid: int,
     cfg: SecurityConfig,
+    connections,  # netwatch.ConnectionLog; passed explicitly to avoid a circular import
 ) -> dict | None:
     """Compound flag: process whose exe is in a suspicious path AND who
-    holds at least one external connection. Strong signal — the cost is
-    one dict lookup (the netwatch task already populated CONNECTIONS).
+    holds at least one external connection. Cheap — one dict scan over
+    the already-populated connections log.
     """
     if not exe_link:
         return None
@@ -331,12 +332,10 @@ def classify_external_egress_from_suspicious(
         return None
     if any(sub in exe_link.lower() for sub in cfg.allowlist_substrings):
         return None
-    # Lazy import to avoid a circular dependency at module load.
-    from .netwatch import CONNECTIONS
 
     remotes: list[str] = []
-    with CONNECTIONS._lock:
-        for (cpid, raddr, _proto), conn in CONNECTIONS.seen.items():
+    with connections._lock:
+        for (cpid, raddr, _proto), conn in connections.seen.items():
             if cpid == pid and conn.external:
                 remotes.append(raddr)
                 if len(remotes) >= 3:
@@ -359,6 +358,8 @@ def compute_flags(
     cfg: SecurityConfig,
     cmdline: list[str] | str | None = None,
     start_time: float | None = None,
+    connections=None,    # netwatch.ConnectionLog
+    fs=None,             # fswatch.FsAggregator
 ) -> list[dict]:
     """Run all indicators against a single pid. Non-fatal on /proc races;
     missing data just suppresses the relevant check. `cmdline` and
@@ -391,15 +392,16 @@ def compute_flags(
         if f:
             flags.append(f)
 
-    # Compound: suspicious exe + external connection.
-    f = classify_external_egress_from_suspicious(exe, pid, cfg)
-    if f:
-        flags.append(f)
+    # Compound: suspicious exe + external connection. Requires connections.
+    if connections is not None:
+        f = classify_external_egress_from_suspicious(exe, pid, cfg, connections)
+        if f:
+            flags.append(f)
 
     # Phase 10 A3: filesystem burst flags from the eBPF aggregator. No-op
-    # when eBPF isn't running (the aggregator's window is empty).
-    from .fswatch import FS
-    flags.extend(FS.flag(pid))
+    # when eBPF isn't running or fs isn't provided.
+    if fs is not None:
+        flags.extend(fs.flag(pid))
 
     return flags
 

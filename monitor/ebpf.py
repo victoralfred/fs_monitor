@@ -20,10 +20,9 @@ import logging
 import shutil
 import time
 
-from .fswatch import FS
-from .history import HISTORY, ExecEvent
+from .history import ExecEvent
 from .metrics import EBPF_EVENTS
-from .netwatch import CONNECTIONS, Conn, is_external
+from .netwatch import Conn, is_external
 
 log = logging.getLogger(__name__)
 
@@ -80,7 +79,11 @@ tracepoint:sock:inet_sock_set_state
 
 
 class EbpfTracer:
-    def __init__(self) -> None:
+    def __init__(self, state) -> None:
+        # `state` is an AppState. The tracer writes exec events into
+        # state.history, connect events into state.connections, and
+        # file events into state.fs.
+        self.state = state
         self._proc: asyncio.subprocess.Process | None = None
         self._task: asyncio.Task | None = None
 
@@ -146,7 +149,7 @@ class EbpfTracer:
                 pid = int(rec.get("pid", 0))
                 comm = str(rec.get("comm", ""))
                 if t == "exec":
-                    HISTORY.add_exec(ExecEvent(
+                    self.state.history.add_exec(ExecEvent(
                         at=time.time(),
                         pid=pid,
                         ppid=int(rec.get("ppid", 0)),
@@ -156,17 +159,16 @@ class EbpfTracer:
                         source="ebpf",
                     ))
                 elif t == "open":
-                    FS.record_write(pid, comm, str(rec.get("path", "")))
+                    self.state.fs.record_write(pid, comm, str(rec.get("path", "")))
                 elif t == "unlink":
-                    FS.record_unlink(pid, comm, str(rec.get("path", "")))
+                    self.state.fs.record_unlink(pid, comm, str(rec.get("path", "")))
                 elif t == "connect":
                     self._handle_connect(pid, comm, rec)
                 EBPF_EVENTS.inc()
             except (TypeError, ValueError):
                 continue
 
-    @staticmethod
-    def _handle_connect(pid: int, comm: str, rec: dict) -> None:
+    def _handle_connect(self, pid: int, comm: str, rec: dict) -> None:
         """A1: every outbound TCP connect() lands here within milliseconds
         of the SYN. Fills the gap where a polling-based netwatch (even at
         1 s) would miss a 50 ms curl that exits before the next tick.
@@ -183,7 +185,7 @@ class EbpfTracer:
         raddr = f"[{daddr}]:{dport}" if family == 6 else f"{daddr}:{dport}"
         proto = "tcp6" if family == 6 else "tcp"
         now = time.time()
-        CONNECTIONS.update([Conn(
+        self.state.connections.update([Conn(
             pid=pid, comm=comm, proto=proto,
             laddr=None, raddr=raddr,
             state="CONNECT",  # marks an ebpf-sourced intent record

@@ -8,7 +8,6 @@ from typing import Any
 
 import psutil
 
-from . import scanner as scanner_mod
 from .fd import read_fds
 from .maps import annotate_system, read_maps
 from .sockets import load_socket_map
@@ -71,7 +70,7 @@ def _safe(callable_, default=None):
         return default
 
 
-def collect(pid: int) -> dict[str, Any] | None:
+def collect(pid: int, security_cfg=None) -> dict[str, Any] | None:
     """Return full detail dict for pid, or None if the process is gone."""
     try:
         p = psutil.Process(pid)
@@ -135,7 +134,9 @@ def collect(pid: int) -> dict[str, Any] | None:
         )
 
     map_entries = read_maps(pid)
-    annotate_system(map_entries, scanner_mod.SECURITY_CFG.system_lib_prefixes)
+    from .security import SecurityConfig
+    cfg = security_cfg if security_cfg is not None else SecurityConfig()
+    annotate_system(map_entries, cfg.system_lib_prefixes)
     maps = [
         {
             "path": m.path,
