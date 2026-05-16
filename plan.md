@@ -289,6 +289,62 @@ the TOML `[security]` table.
 
 ---
 
+## Phase 10 — Supply-chain attack coverage ✅ (shipped)
+
+Closes the three gaps surfaced when stress-testing the tool against a
+node-ipc-style attack. The original tool caught the network *after* the
+malware was up and running, but missed (a) sub-5-second outbound bursts,
+(b) the filesystem write storm that *is* the payload for several real
+npm/PyPI incidents, and (c) "this destination is weird" when the binary
+is a legit interpreter like `node` or `python`.
+
+- ✅ **A1 Netwatch cadence drop + adaptive back-off.** 5 s → 1 s base
+  interval. Adaptive: if a tick takes >250 ms the interval doubles
+  (cap 8 s); recovery halves it back toward 1 s. Catches most
+  short-lived outbound bursts without leaning on eBPF.
+- ✅ **A2 PTR + ASN enrichment.** `monitor/enrichment.py` runs lazy
+  reverse-DNS and ASN lookups in a 4-thread pool, cached for 1 h.
+  `Enricher.enrich()` returns whatever is cached and kicks off a
+  background lookup if the IP is novel — non-blocking on the hot path.
+  Inflight dedup prevents thundering-herd lookups. ASN via
+  `maxminddb` + GeoLite2-ASN.mmdb (optional; PTR-only fallback if the
+  DB isn't present). Augments `/api/connections` rows with `ptr`,
+  `asn`, `asn_org`. Network panel renders org name + reverse-DNS
+  inline below each remote address. 4 new tests.
+- ✅ **A3 Filesystem burst detection.** `monitor/fswatch.py` per-pid
+  rolling window (5 s) fed by two new bpftrace probes:
+  `tracepoint:syscalls:sys_enter_openat` filtered to `O_TRUNC|O_CREAT`
+  and `tracepoint:syscalls:sys_enter_unlinkat`. Two new flags:
+  - **`fs_write_burst`** — >25 distinct files opened-for-write in 5 s.
+  - **`fs_mass_delete`** — >10 unlinks in 5 s.
+  Allowlists: comm-substring match against build/install tools
+  (cc, gcc, clang, tar, git, npm, pnpm, cargo, …) and path-prefix
+  match against expected-noisy roots (`node_modules/`, `.git/`,
+  `target/`, `build/`, `.cache/`, …). 9 new tests covering the
+  threshold, comm allowlist, path allowlist, distinct-paths-not-repeats,
+  pid-prune, and rolling window expiry. Requires eBPF enabled; no-op
+  otherwise.
+- ⏳ **A4 Outbound destination baseline (deferred).** Track which
+  `(comm, asn)` pairs each host has seen; flag novel pairs after a
+  warmup period. Needs persistent state and per-host tuning; revisit
+  after A1–A3 are live.
+- ⏳ **A5 Threat-intel feed (deferred).** Match remote IPs against
+  AbuseIPDB / Spamhaus DROP / equivalent. Off by default; requires feed
+  refresh discipline.
+
+### Honest limitations
+
+- A1's 1-second poll still misses bursts under a second. The eBPF
+  `tcp_connect` probe would catch every connect() but adds kernel-
+  struct parsing pain to the bpftrace program; deferred until A1 is
+  shown to be insufficient.
+- A3 only works when eBPF is enabled (root or CAP_BPF + CAP_PERFMON).
+  Without it the flags simply never fire.
+- A2 with no ASN DB present falls back to PTR-only; we don't ship the
+  DB. Documented in `monitor.example.toml`.
+
+---
+
 ## Phase 9 — Network egress tracking ✅ (shipped)
 
 Continuous global view of which processes hold connections to public-

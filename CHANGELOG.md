@@ -3,6 +3,31 @@
 Loosely follows [Keep a Changelog](https://keepachangelog.com/). Dates in
 ISO 8601.
 
+## 2026-05-16 — Phase 10 (supply-chain attack coverage)
+
+### Added
+- Netwatch cadence dropped 5 s → 1 s with adaptive back-off (interval
+  doubles after a slow tick, halves after a fast one).
+- `monitor/enrichment.py`: lazy reverse-DNS + optional MaxMind ASN
+  lookup with 1-hour TTL cache, inflight dedup, 4-thread pool. Network
+  panel rows now show "(Cloudflare, ptr.example.com)" next to each
+  external remote.
+- `monitor/fswatch.py`: per-pid rolling 5-second window of opens-for-
+  write and unlinks, fed by two new bpftrace probes (openat with
+  O_TRUNC|O_CREAT, unlinkat). New security flags `fs_write_burst`
+  (>25 distinct files) and `fs_mass_delete` (>10 unlinks). Allowlists
+  for noisy build/install tools and expected-noisy paths.
+- 13 new tests (9 fswatch + 4 enrichment).
+
+### Changed
+- `Conn` dataclass gains `ptr`, `asn`, `asn_org` fields.
+- bpftrace program now multi-probe; reader switches on a `t` (type)
+  discriminator field.
+- `compute_flags` calls into `fswatch.FS.flag()` so write-burst /
+  mass-delete signals fire on the next scanner tick after the threshold
+  trips.
+- `/metrics` flag inventory adds `fs_write_burst` and `fs_mass_delete`.
+
 ## 2026-05-16 — Phase 9 (network egress tracking)
 
 ### Added
