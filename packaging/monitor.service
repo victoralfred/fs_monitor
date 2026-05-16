@@ -1,0 +1,45 @@
+[Unit]
+Description=monitor — local process & open-file explorer
+After=network.target
+
+[Service]
+Type=simple
+
+# ─── User choice (READ THIS) ─────────────────────────────────────────────
+# What you see in the UI depends on which user runs the service:
+#   - Root: sees every process's fds, env, and exe link. Highest visibility,
+#     highest blast radius if the web UI is ever exposed.
+#   - A dedicated unprivileged user (recommended for system installs):
+#     create with `sudo useradd --system --no-create-home --shell /usr/sbin/nologin monitor`,
+#     then set User=monitor below. You'll see only processes that user owns,
+#     plus public /proc data on others.
+#   - `nobody`: works, but systemd will warn (`Special user nobody … not safe`)
+#     because many services map their failure mode onto `nobody` and you can
+#     end up with surprising interactions. Avoid for anything long-running.
+# Leave User=root if you genuinely want a host-wide inspector. Otherwise:
+User=root
+Group=root
+
+# Adjust the binary path to match how you installed: `pip install .` to the
+# system Python puts it at /usr/local/bin/monitor; pipx puts it at
+# ~/.local/pipx/venvs/monitor/bin/monitor; a venv put it in <venv>/bin/.
+ExecStart=/usr/local/bin/monitor
+
+# Config file is optional. Drop one at /etc/monitor/config.toml if you want
+# to override defaults — `monitor` will pick it up from the standard search
+# path (`./monitor.toml`, `$MONITOR_CONFIG`, `~/.config/monitor/config.toml`).
+Environment=MONITOR_CONFIG=/etc/monitor/config.toml
+
+Restart=on-failure
+RestartSec=3
+
+# Hardening — safe defaults for a read-only inspector.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# We need /proc visibility, so don't restrict it.
+# ProtectProc=invisible would defeat the purpose.
+
+[Install]
+WantedBy=multi-user.target

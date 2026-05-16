@@ -1,0 +1,70 @@
+# Example monitor config. Copy to ./monitor.toml or
+# ~/.config/monitor/config.toml, or pass --config <path>.
+# CLI flags override anything set here.
+
+[server]
+host = "127.0.0.1"
+port = 8765
+allow_remote = false
+log_level = "info"  # debug | info | warning | error
+
+[scanner]
+interval = 2.0  # seconds between process-tree scans
+
+[security]
+# Env-var KEY names matching any of these regexes are redacted even when
+# show_env=1. Combined via "|" at load time.
+redact_patterns = [
+  "(?i)token|secret|key|pass|cred|auth",
+]
+
+# Security indicators (Lite tier) — see monitor/security.py.
+#
+# B1: any exe path starting with one of these prefixes is flagged.
+suspicious_prefixes = ["/tmp/", "/dev/shm/", "/var/tmp/", "/run/user/"]
+
+# Substrings that, if present in an exe path, suppress the B1 flag
+# regardless of prefix match (carve-outs for legitimate sandboxes).
+# Compared case-insensitively.
+allowlist_substrings = ["flatpak", "snap", "appimage"]
+
+# B5: argv[0] vs basename(exe) mismatch — known multi-call and interpreter
+# binaries whose argv[0] legitimately differs from exe basename.
+multicall_bins = ["busybox", "toybox", "coreutils"]
+interpreter_bins = [
+  "python", "python3", "node", "perl", "ruby", "java",
+  "bash", "sh", "dash", "zsh", "fish",
+]
+
+# B4: libs loaded from outside these prefixes get a "non-system" badge in
+# the libs detail tab.
+system_lib_prefixes = [
+  "/usr/", "/lib/", "/lib32/", "/lib64/", "/opt/",
+  "/snap/", "/var/lib/flatpak/", "/nix/store/",
+]
+
+# B3: env vars whose presence triggers a dangerous_env flag. Keys are
+# matched exactly (case-sensitive — these are well-known Linux names).
+dangerous_env_keys = ["LD_PRELOAD", "LD_AUDIT"]
+
+# B7: paranoid mode — sweeps the full pid range every 10 s probing for
+# pids that respond to kill(0) but are missing from /proc (rootkit
+# signature). Off by default; significant performance cost on systems
+# with very large pid_max.
+paranoid = true
+
+# Phase 6 #7: process killing via POST /api/processes/{pid}/signal.
+# Off by default. ACL:
+#   "none"       — endpoint always returns 403 even when allow_kill = true
+#   "same_user"  — only pids owned by the same uid as the monitor process
+#   "all"        — any pid; relies on OS permissions
+allow_kill = false
+kill_acl = "same_user"
+
+[ebpf]
+# Phase 6 #4: spawn bpftrace to capture execve events in real time and
+# merge them into the timeline. Requires bpftrace on PATH and CAP_BPF +
+# CAP_PERFMON (or root). Gracefully degrades when prerequisites are
+# missing — server runs without eBPF, scanner-derived exec events still
+# populate the timeline.
+enabled = false

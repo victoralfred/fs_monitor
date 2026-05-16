@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+monitor/static/
+.pytest_cache/
+# Local-only override of monitor.example.toml — never commit your tuned config.
+monitor.toml
