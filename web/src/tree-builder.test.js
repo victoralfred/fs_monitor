@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildTree, applyDiff } from './tree-builder.js';
+import { buildTree, applyDiff, cpuHeatColor } from './tree-builder.js';
 
 const p = (pid, ppid, extra = {}) => ({
   pid,
@@ -66,6 +66,32 @@ describe('buildTree', () => {
     const procs = mapOf(p(1, 0), p(99, 50));
     const tree = buildTree(procs, '', false);
     expect(tree.map((r) => r.pid).sort()).toEqual([1, 99]);
+  });
+});
+
+describe('cpuHeatColor', () => {
+  it('returns null below the noise floor', () => {
+    expect(cpuHeatColor(0)).toBeNull();
+    expect(cpuHeatColor(0.5)).toBeNull();
+    expect(cpuHeatColor(undefined)).toBeNull();
+  });
+
+  it('returns an hsla string for non-trivial cpu', () => {
+    expect(cpuHeatColor(5)).toMatch(/^hsla\(\d+, 90%, 55%, /);
+    expect(cpuHeatColor(25)).toMatch(/^hsla\(\d+, 90%, 55%, /);
+    expect(cpuHeatColor(99)).toMatch(/^hsla\(\d+, 90%, 55%, /);
+  });
+
+  it('shifts hue toward red as cpu rises', () => {
+    const low = cpuHeatColor(2);
+    const high = cpuHeatColor(50);
+    const hueLow = parseFloat(low.match(/hsla\(([\d.]+),/)[1]);
+    const hueHigh = parseFloat(high.match(/hsla\(([\d.]+),/)[1]);
+    expect(hueLow).toBeGreaterThan(hueHigh); // 60 (yellow) > 0 (red)
+  });
+
+  it('caps intensity at 50% cpu (anything higher looks the same)', () => {
+    expect(cpuHeatColor(50)).toBe(cpuHeatColor(99));
   });
 });
 

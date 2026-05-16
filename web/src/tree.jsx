@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState, useEffect } from 'preact/hooks';
+import { cpuHeatColor } from './tree-builder.js';
 
 const ROW_H = 22;
 
@@ -57,16 +58,23 @@ export function Tree({ tree, recentNew, recentGone, recentExec, selected, onSele
           const idx = start + i;
           const hasKids = n.children.length > 0;
           const open = expanded.has(n.pid);
+          const isSel = selected === n.pid;
+          const isNew = recentNew.has(n.pid);
+          const isGone = recentGone && recentGone.has(n.pid);
+          const isExec = recentExec && recentExec.has(n.pid);
           const cls = [
             'row',
-            selected === n.pid ? 'sel' : '',
-            recentNew.has(n.pid) ? 'new' : '',
-            recentGone && recentGone.has(n.pid) ? 'gone' : '',
-            recentExec && recentExec.has(n.pid) ? 'exec' : '',
+            isSel ? 'sel' : '',
+            isNew ? 'new' : '',
+            isGone ? 'gone' : '',
+            isExec ? 'exec' : '',
             n.kthread ? 'kthread' : '',
           ]
             .filter(Boolean)
             .join(' ');
+          // CPU heat map — only tint rows that aren't already wearing a
+          // state colour, otherwise we'd hide the new/gone/exec/sel cue.
+          const heat = !isSel && !isNew && !isGone && !isExec ? cpuHeatColor(n.cpu) : null;
           return (
             <div
               key={n.pid}
@@ -78,6 +86,7 @@ export function Tree({ tree, recentNew, recentGone, recentExec, selected, onSele
                 right: 0,
                 height: ROW_H,
                 paddingLeft: 6 + n.depth * 14,
+                ...(heat ? { backgroundColor: heat } : {}),
               }}
               onClick={() => onSelect(n.pid)}
             >
