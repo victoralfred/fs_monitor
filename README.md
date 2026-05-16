@@ -11,32 +11,32 @@ and [CHANGELOG.md](CHANGELOG.md) for what's shipped.
 
 - Live process tree with virtualized rendering and `/proc`-derived metadata
 - Per-process detail panel with five tabs:
-  - **files** — open file descriptors classified by kind (file/dir/pipe/
+  - **files** - open file descriptors classified by kind (file/dir/pipe/
     socket/anon/device/deleted), with socket addresses resolved from
     `/proc/net/*`
-  - **sockets** — full network/Unix socket table from psutil
-  - **libs** — shared libraries and mapped files from `/proc/<pid>/maps`,
+  - **sockets** - full network/Unix socket table from psutil
+  - **libs** - shared libraries and mapped files from `/proc/<pid>/maps`,
     with deleted-file flags
-  - **env** — environment variables, hidden by default; reveal toggle masks
+  - **env** - environment variables, hidden by default; reveal toggle masks
     secret-looking keys
-  - **overview** — pointer to the tabs above
+  - **overview** - pointer to the tabs above
 - Process tree extras:
   - Search filter on pid / name / user
   - Kernel-thread subtree hidden by default; toolbar checkbox reveals them
   - New pids fade in green, removed pids fade out red, exec-without-fork
     flashes yellow
   - Dark mode toggle (persisted in localStorage)
-- WebSocket diff stream — no full-page reloads, no polling
+- WebSocket diff stream - no full-page reloads, no polling
 - Security signals (see [plan.md](plan.md) §"Phase 3 Section B"): flags
   suspicious exe paths, memfd/deleted executables, and kernel-thread name
   impersonation. UI surfaces firing indicators per process, not a numeric
   score.
-- **Network egress panel** — every outbound TCP connection attributed to a
+- **Network egress panel** - every outbound TCP connection attributed to a
   pid + comm, with reverse DNS and ASN org enrichment. eBPF
   `tcp_connect` tracepoint catches sub-second connections that polling
   misses. Lives in a 10-minute rolling log so curl-and-exit still
   shows up.
-- **Filesystem burst detection** — eBPF probes on `openat` (with
+- **Filesystem burst detection** - eBPF probes on `openat` (with
   O_CREAT/O_TRUNC) and `unlinkat` fire flags for processes overwriting
   or deleting files at malware-payload rates.
 
@@ -50,7 +50,7 @@ pip install -e .
 python -m monitor                    # binds 127.0.0.1:8765
 ```
 
-Frontend (separate terminal, **pnpm only** — `npm install` is blocked via
+Frontend (separate terminal, **pnpm only** - `npm install` is blocked via
 `engine-strict`):
 
 ```sh
@@ -128,7 +128,7 @@ you which probe failed to attach on your kernel.
 ## ASN + reverse-DNS enrichment (free, recommended)
 
 Without this you see remote IPs and PTR records. With it you also see
-the AS org name — `Hetzner Online GmbH`, `Cloudflare, Inc.`, etc. —
+the AS org name - `Hetzner Online GmbH`, `Cloudflare, Inc.`, etc. -
 which turns triage from "huh, an IP" into "wait, why is `node` calling
 *that*?" at a glance.
 
@@ -211,7 +211,7 @@ docker run --rm --pid=host -p 8765:8765 monitor
 
 A sample unit lives at `packaging/monitor.service`. The shipped unit runs
 as `root` (the only way to get full eBPF + paranoid coverage). Edit
-`User=` if you're OK with reduced visibility — comments in the file
+`User=` if you're OK with reduced visibility - comments in the file
 explain the trade-offs.
 
 ### Quick install
@@ -297,8 +297,8 @@ cd web && pnpm test                  # frontend, Vitest
 ### "Process #N has exited" the moment I click on a row
 
 The Process Tree is a 2-second snapshot. Anything shorter-lived than
-that — shell autocomplete subprocesses, git hooks, language-server
-helpers, `curl`s that finish quickly — is gone by the time your click
+that - shell autocomplete subprocesses, git hooks, language-server
+helpers, `curl`s that finish quickly - is gone by the time your click
 hits the server. The 404 is honest; look in the **Network panel**
 (🌐) or **Timeline panel** (⏱) for short-lived activity, both keep a
 rolling history. Drop `[scanner].interval = 1.0` if you want a tighter
@@ -341,25 +341,24 @@ sudo .venv/bin/python -m monitor --config ./monitor.toml
 Install bpftrace (`sudo apt install bpftrace`) and run as root.
 If bpftrace is installed but exits with a non-zero rc, the `stderr:`
 field in the log line names the failing probe. Most common case: one
-specific kernel-trace point is unavailable on your kernel — open an
+specific kernel-trace point is unavailable on your kernel - open an
 issue with the stderr text.
 
 ### Server starts but I can't reach the UI
 
 Default bind is `127.0.0.1`. From the same machine browse to
 `http://127.0.0.1:8765`. Remote access requires both
-`--host 0.0.0.0` and `--allow-remote` — the second flag is an
+`--host 0.0.0.0` and `--allow-remote` - the second flag is an
 explicit acknowledgment that the tool has no authentication.
 
 ## Security notes
 
 - Localhost-only by default. Bind elsewhere with `--host 0.0.0.0
-  --allow-remote`. There is no authentication — this is a tool for
+  --allow-remote`. There is no authentication - this is a tool for
   inspecting your own machine.
 - WebSocket connections require a same-origin `Origin` header (or none, for
   CLI clients).
 - Env-var values are hidden by default. Toggling "show values" still masks
   keys matching the configured redaction regex.
-- Process killing is not implemented (deliberate — see plan.md).
 - Security signals are *observation only*. Nothing is killed, blocked, or
   reported off-host.
