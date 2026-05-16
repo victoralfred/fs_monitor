@@ -102,6 +102,9 @@ def _scan_and_finalize(prev: dict[int, ProcDict]):
         HISTORY.record(pid, row["cpu"], row["rss"])
     if diff.removed:
         HISTORY.prune(live_pids)
+        # Phase 10 A3: drop FS-window state for dead pids too.
+        from .fswatch import FS
+        FS.prune_pids(live_pids)
 
     # Timeline exec log.
     for row in diff.added:

@@ -396,6 +396,11 @@ def compute_flags(
     if f:
         flags.append(f)
 
+    # Phase 10 A3: filesystem burst flags from the eBPF aggregator. No-op
+    # when eBPF isn't running (the aggregator's window is empty).
+    from .fswatch import FS
+    flags.extend(FS.flag(pid))
+
     return flags
 
 

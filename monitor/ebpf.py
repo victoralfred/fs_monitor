@@ -20,20 +20,38 @@ import logging
 import shutil
 import time
 
+from .fswatch import FS
 from .history import HISTORY, ExecEvent
 from .metrics import EBPF_EVENTS
 
 log = logging.getLogger(__name__)
 
-# bpftrace program: emit JSON for every execve enter. We use printf with a
-# json escape; bpftrace's --format json prints structured output for the
-# "printf" actions when available, but to keep the contract stable across
-# versions we hand-roll the JSON line.
+# bpftrace program: emit JSON for execve, openat-for-write, and unlinkat.
+# Type discriminator on each line so the reader can route. We hand-roll the
+# JSON (rather than relying on bpftrace's --format json) to stay portable
+# across bpftrace versions.
+#
+# openat filter: O_CREAT (0x40) | O_TRUNC (0x200) | O_WRONLY (0x1). We fire
+# on opens that *create or truncate*, which matches the overwrite-payload
+# shape. Pure reads don't trip this.
 BPFTRACE_PROG = r"""
 tracepoint:syscalls:sys_enter_execve
 {
-    printf("{\"pid\":%d,\"ppid\":%d,\"comm\":\"%s\",\"argv0\":\"%s\"}\n",
+    printf("{\"t\":\"exec\",\"pid\":%d,\"ppid\":%d,\"comm\":\"%s\",\"argv0\":\"%s\"}\n",
            pid, curtask->real_parent->tgid, comm, str(args->filename));
+}
+
+tracepoint:syscalls:sys_enter_openat
+/ (args->flags & 0x40) || (args->flags & 0x200) /
+{
+    printf("{\"t\":\"open\",\"pid\":%d,\"comm\":\"%s\",\"path\":\"%s\"}\n",
+           pid, comm, str(args->filename));
+}
+
+tracepoint:syscalls:sys_enter_unlinkat
+{
+    printf("{\"t\":\"unlink\",\"pid\":%d,\"comm\":\"%s\",\"path\":\"%s\"}\n",
+           pid, comm, str(args->pathname));
 }
 """
 
@@ -101,15 +119,23 @@ class EbpfTracer:
             except ValueError:
                 continue
             try:
-                HISTORY.add_exec(ExecEvent(
-                    at=time.time(),
-                    pid=int(rec.get("pid", 0)),
-                    ppid=int(rec.get("ppid", 0)),
-                    name=str(rec.get("comm", "")),
-                    exe=str(rec.get("argv0") or "") or None,
-                    cmd=str(rec.get("argv0", "")),
-                    source="ebpf",
-                ))
+                t = rec.get("t", "exec")
+                pid = int(rec.get("pid", 0))
+                comm = str(rec.get("comm", ""))
+                if t == "exec":
+                    HISTORY.add_exec(ExecEvent(
+                        at=time.time(),
+                        pid=pid,
+                        ppid=int(rec.get("ppid", 0)),
+                        name=comm,
+                        exe=str(rec.get("argv0") or "") or None,
+                        cmd=str(rec.get("argv0", "")),
+                        source="ebpf",
+                    ))
+                elif t == "open":
+                    FS.record_write(pid, comm, str(rec.get("path", "")))
+                elif t == "unlink":
+                    FS.record_unlink(pid, comm, str(rec.get("path", "")))
                 EBPF_EVENTS.inc()
             except (TypeError, ValueError):
                 continue

@@ -10,6 +10,8 @@ const FLAG_LABELS = {
   argv_exe_mismatch: 'argv[0] does not match exe (possible masquerade)',
   dangerous_env: 'Dangerous environment variable set (LD_PRELOAD / LD_AUDIT)',
   external_egress_from_suspicious: 'Suspicious-path exe is talking to the internet',
+  fs_write_burst: 'Burst of file writes (possible overwrite payload)',
+  fs_mass_delete: 'Mass file deletion (possible wiper)',
 };
 
 function SecurityTab({ flags }) {
