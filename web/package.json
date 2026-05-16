@@ -1,0 +1,32 @@
+{
+  "name": "monitor-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "lint": "eslint src && prettier --check src",
+    "format": "prettier --write src"
+  },
+  "dependencies": {
+    "preact": "^10.22.0"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.8.2",
+    "eslint": "^9.10.0",
+    "eslint-plugin-react": "^7.35.0",
+    "globals": "^15.9.0",
+    "jsdom": "^25.0.0",
+    "prettier": "^3.3.3",
+    "vite": "^5.2.0",
+    "vitest": "^2.0.5"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "pnpm": ">=9",
+    "npm": "please-use-pnpm"
+  }
+}
