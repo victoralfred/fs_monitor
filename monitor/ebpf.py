@@ -23,17 +23,24 @@ import time
 from .fswatch import FS
 from .history import HISTORY, ExecEvent
 from .metrics import EBPF_EVENTS
+from .netwatch import CONNECTIONS, Conn, is_external
 
 log = logging.getLogger(__name__)
 
-# bpftrace program: emit JSON for execve, openat-for-write, and unlinkat.
-# Type discriminator on each line so the reader can route. We hand-roll the
-# JSON (rather than relying on bpftrace's --format json) to stay portable
-# across bpftrace versions.
+# bpftrace program: emit JSON for execve, openat-for-write, unlinkat, and
+# outbound tcp connect. Type discriminator on each line so the reader can
+# route. We hand-roll the JSON (rather than relying on bpftrace's
+# --format json) to stay portable across bpftrace versions.
 #
-# openat filter: O_CREAT (0x40) | O_TRUNC (0x200) | O_WRONLY (0x1). We fire
-# on opens that *create or truncate*, which matches the overwrite-payload
-# shape. Pure reads don't trip this.
+# openat filter: O_CREAT (0x40) | O_TRUNC (0x200). We fire on opens that
+# *create or truncate*, which matches the overwrite-payload shape. Pure
+# reads don't trip this.
+#
+# tcp_v{4,6}_connect probes fire on every outbound TCP connect() — that's
+# the only way to catch sub-second connections, because by the time a
+# 1-second netwatch poll runs the socket is closed and unattributed.
+# We read daddr/dport off struct sock. dport is network-byte-order, so we
+# byteswap to host order before printing.
 BPFTRACE_PROG = r"""
 tracepoint:syscalls:sys_enter_execve
 {
@@ -52,6 +59,24 @@ tracepoint:syscalls:sys_enter_unlinkat
 {
     printf("{\"t\":\"unlink\",\"pid\":%d,\"comm\":\"%s\",\"path\":\"%s\"}\n",
            pid, comm, str(args->pathname));
+}
+
+kprobe:tcp_v4_connect
+{
+    $sk = (struct sock *)arg0;
+    $dport = (uint16)$sk->__sk_common.skc_dport;
+    $dport = ($dport >> 8) | (($dport & 0xff) << 8);
+    printf("{\"t\":\"connect\",\"pid\":%d,\"comm\":\"%s\",\"family\":4,\"daddr\":\"%s\",\"dport\":%d}\n",
+           pid, comm, ntop(2, $sk->__sk_common.skc_daddr), $dport);
+}
+
+kprobe:tcp_v6_connect
+{
+    $sk = (struct sock *)arg0;
+    $dport = (uint16)$sk->__sk_common.skc_dport;
+    $dport = ($dport >> 8) | (($dport & 0xff) << 8);
+    printf("{\"t\":\"connect\",\"pid\":%d,\"comm\":\"%s\",\"family\":6,\"daddr\":\"%s\",\"dport\":%d}\n",
+           pid, comm, ntop(10, $sk->__sk_common.skc_v6_daddr.in6_u.u6_addr8), $dport);
 }
 """
 
@@ -136,9 +161,37 @@ class EbpfTracer:
                     FS.record_write(pid, comm, str(rec.get("path", "")))
                 elif t == "unlink":
                     FS.record_unlink(pid, comm, str(rec.get("path", "")))
+                elif t == "connect":
+                    self._handle_connect(pid, comm, rec)
                 EBPF_EVENTS.inc()
             except (TypeError, ValueError):
                 continue
+
+    @staticmethod
+    def _handle_connect(pid: int, comm: str, rec: dict) -> None:
+        """A1: every outbound TCP connect() lands here within milliseconds
+        of the SYN. Fills the gap where a polling-based netwatch (even at
+        1 s) would miss a 50 ms curl that exits before the next tick.
+        """
+        try:
+            daddr = str(rec.get("daddr", "")).strip()
+            dport = int(rec.get("dport", 0))
+            family = int(rec.get("family", 4))
+        except (TypeError, ValueError):
+            return
+        if not daddr or dport <= 0:
+            return
+        # Format the raddr the same way netwatch does for consistency.
+        raddr = f"[{daddr}]:{dport}" if family == 6 else f"{daddr}:{dport}"
+        proto = "tcp6" if family == 6 else "tcp"
+        now = time.time()
+        CONNECTIONS.update([Conn(
+            pid=pid, comm=comm, proto=proto,
+            laddr=None, raddr=raddr,
+            state="CONNECT",  # marks an ebpf-sourced intent record
+            external=is_external(daddr),
+            first_seen=now, last_seen=now,
+        )])
 
     async def stop(self) -> None:
         if self._task:

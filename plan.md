@@ -324,6 +324,13 @@ is a legit interpreter like `node` or `python`.
   threshold, comm allowlist, path allowlist, distinct-paths-not-repeats,
   pid-prune, and rolling window expiry. Requires eBPF enabled; no-op
   otherwise.
+- ✅ **A1.5 eBPF tcp_connect probe.** Polling at 1 s still missed sub-
+  second curls (the user's first test exposed this). Added kprobes on
+  `tcp_v4_connect` and `tcp_v6_connect` so every outbound TCP connect()
+  lands in the connection log within milliseconds of the SYN, regardless
+  of how briefly the process lives. Reader extracts daddr + dport from
+  struct sock; state field is `CONNECT` so eBPF-sourced rows are
+  distinguishable from psutil-sourced ones.
 - ⏳ **A4 Outbound destination baseline (deferred).** Track which
   `(comm, asn)` pairs each host has seen; flag novel pairs after a
   warmup period. Needs persistent state and per-host tuning; revisit
