@@ -60,6 +60,33 @@ def test_security_headers_on_html():
         assert r.headers.get("x-content-type-options") == "nosniff"
 
 
+def test_docs_path_exempt_from_csp():
+    """FastAPI's Swagger UI loads from cdn.jsdelivr.net, which our SPA
+    CSP would block. The middleware should leave /docs alone.
+    """
+    app = create_app()
+    with TestClient(app) as client:
+        r = client.get("/docs")
+        assert r.status_code == 200
+        assert "swagger" in r.text.lower() or "fastapi" in r.text.lower()
+        # CSP must NOT be applied to docs.
+        assert r.headers.get("content-security-policy") is None
+
+
+def test_openapi_json_exposes_response_models():
+    """Phase 12 wired Pydantic models into every endpoint. Verify the
+    OpenAPI schema actually reflects them.
+    """
+    app = create_app()
+    with TestClient(app) as client:
+        r = client.get("/openapi.json")
+        assert r.status_code == 200
+        schema = r.json()
+        assert "ProcessListResponse" in schema["components"]["schemas"]
+        assert "HealthResponse" in schema["components"]["schemas"]
+        assert "ConnectionsResponse" in schema["components"]["schemas"]
+
+
 def test_ws_rejects_cross_origin():
     app = create_app()
     with TestClient(app) as client:
