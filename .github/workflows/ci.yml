@@ -31,7 +31,7 @@ jobs:
         run: corepack enable && corepack prepare pnpm@9 --activate
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
-      - run: pnpm test --run
+      - run: pnpm test -- --run
       - run: pnpm build
 
   docker:
