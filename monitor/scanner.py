@@ -262,11 +262,21 @@ class Scanner:
             await asyncio.sleep(max(0.0, self.interval - (time.monotonic() - t0)))
 
     async def _run_netwatch(self) -> None:
-        """Periodic egress scan — every 5 s. Cheaper than paranoid; we run
-        it more often because external connections matter.
+        """Periodic egress scan with adaptive back-off.
+
+        Default cadence is 1 s — tight enough to catch most short-lived
+        outbound bursts. If a tick takes longer than NETWATCH_SLOW_MS
+        the interval doubles (capped at NETWATCH_MAX_S) so the scanner
+        doesn't pin a core on busy hosts. Recovery is automatic: every
+        fast tick halves the interval back toward 1 s.
         """
+        base = 1.0
+        slow_threshold_ms = 250.0
+        max_interval = 8.0
+        interval = base
         while True:
-            await asyncio.sleep(5.0)
+            await asyncio.sleep(interval)
+            t0 = time.monotonic()
             try:
                 name_lookup = {p: r["name"] for p, r in self.snapshot.items()}
                 conns = await asyncio.to_thread(netwatch_scan, name_lookup)
@@ -276,6 +286,11 @@ class Scanner:
             except Exception:
                 self.netwatch_error_count += 1
                 log.exception("netwatch scan failed (count=%d)", self.netwatch_error_count)
+            elapsed_ms = (time.monotonic() - t0) * 1000.0
+            if elapsed_ms > slow_threshold_ms:
+                interval = min(max_interval, interval * 2.0)
+            else:
+                interval = max(base, interval * 0.5)
 
     async def _run_paranoid(self) -> None:
         """B7 background sweep — only active when SECURITY_CFG.paranoid is True.
