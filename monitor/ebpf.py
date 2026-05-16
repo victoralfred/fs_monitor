@@ -36,11 +36,13 @@ log = logging.getLogger(__name__)
 # *create or truncate*, which matches the overwrite-payload shape. Pure
 # reads don't trip this.
 #
-# tcp_v{4,6}_connect probes fire on every outbound TCP connect() — that's
-# the only way to catch sub-second connections, because by the time a
-# 1-second netwatch poll runs the socket is closed and unattributed.
-# We read daddr/dport off struct sock. dport is network-byte-order, so we
-# byteswap to host order before printing.
+# Outbound TCP connect tracking uses the `sock:inet_sock_set_state`
+# tracepoint filtered to (protocol=TCP, newstate=SYN_SENT). At the kprobe
+# entry to tcp_v4_connect the socket fields aren't populated yet — you
+# read all zeros. The state-transition tracepoint is the canonical
+# "outbound TCP starting" event and its args struct has daddr / dport
+# already in usable form (dport in host byte order, daddr as a byte
+# array). Same probe bcc's tcpconnect / tcplife use.
 BPFTRACE_PROG = r"""
 tracepoint:syscalls:sys_enter_execve
 {
@@ -61,22 +63,18 @@ tracepoint:syscalls:sys_enter_unlinkat
            pid, comm, str(args->pathname));
 }
 
-kprobe:tcp_v4_connect
+tracepoint:sock:inet_sock_set_state
+/ args->protocol == 6 && args->newstate == 2 && args->family == 2 /
 {
-    $sk = (struct sock *)arg0;
-    $dport = (uint16)$sk->__sk_common.skc_dport;
-    $dport = ($dport >> 8) | (($dport & 0xff) << 8);
     printf("{\"t\":\"connect\",\"pid\":%d,\"comm\":\"%s\",\"family\":4,\"daddr\":\"%s\",\"dport\":%d}\n",
-           pid, comm, ntop(2, $sk->__sk_common.skc_daddr), $dport);
+           pid, comm, ntop(2, args->daddr), args->dport);
 }
 
-kprobe:tcp_v6_connect
+tracepoint:sock:inet_sock_set_state
+/ args->protocol == 6 && args->newstate == 2 && args->family == 10 /
 {
-    $sk = (struct sock *)arg0;
-    $dport = (uint16)$sk->__sk_common.skc_dport;
-    $dport = ($dport >> 8) | (($dport & 0xff) << 8);
     printf("{\"t\":\"connect\",\"pid\":%d,\"comm\":\"%s\",\"family\":6,\"daddr\":\"%s\",\"dport\":%d}\n",
-           pid, comm, ntop(10, $sk->__sk_common.skc_v6_daddr.in6_u.u6_addr8), $dport);
+           pid, comm, ntop(10, args->daddr_v6), args->dport);
 }
 """
 
