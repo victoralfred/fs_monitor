@@ -35,9 +35,11 @@ class ExecEvent:
 class History:
     samples_per_pid: int = 60                       # ≈ 2 min at 2 s tick
     timeline_max: int = 2000                        # global exec log cap (SC2)
-    _per_pid: dict[int, deque] = field(default_factory=dict)
-    _timeline: deque[ExecEvent] = field(default_factory=lambda: deque(maxlen=2000))
-    _lock: Lock = field(default_factory=Lock)
+    _per_pid: dict[int, deque] = field(default_factory=dict, repr=False, compare=False)
+    _timeline: deque[ExecEvent] = field(
+        default_factory=lambda: deque(maxlen=2000), repr=False, compare=False,
+    )
+    _lock: Lock = field(default_factory=Lock, repr=False, compare=False)
 
     def record(self, pid: int, cpu: float, rss: int) -> None:
         with self._lock:
@@ -71,7 +73,3 @@ class History:
             if since is None:
                 return list(self._timeline)
             return [e for e in self._timeline if e.at >= since]
-
-
-# Single instance shared by scanner and app.
-HISTORY = History()

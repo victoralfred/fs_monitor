@@ -129,5 +129,3 @@ class Enricher:
         self._executor.shutdown(wait=False)
 
 
-# Module singleton; the scanner and the connections endpoint share this.
-ENRICHER = Enricher()

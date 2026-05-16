@@ -1,5 +1,22 @@
 // Pure tree-construction logic, extracted so it can be unit-tested.
 
+/**
+ * Map a CPU% (0..100) to a background colour for the heat map.
+ * Returns null below the noise floor so most rows stay un-tinted.
+ *
+ * Gradient runs yellow → orange → red. Alpha grows with intensity so
+ * very-low CPU stays barely-visible and 50%+ is the maximum saturation
+ * we'll show. Anything beyond 50% looks the same — at that point the
+ * user knows it's a busy process, the exact shade adds nothing.
+ */
+export function cpuHeatColor(cpu) {
+  if (!cpu || cpu < 1) return null;
+  const intensity = Math.min(1, cpu / 50);
+  const hue = 60 - intensity * 60; // 60deg=yellow → 0deg=red
+  const alpha = 0.12 + intensity * 0.4;
+  return `hsla(${hue}, 90%, 55%, ${alpha.toFixed(2)})`;
+}
+
 export function buildTree(procs, query, showKthreads) {
   const q = query.trim().toLowerCase();
   const match = (p) =>

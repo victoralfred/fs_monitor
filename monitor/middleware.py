@@ -34,11 +34,19 @@ _HTML_HEADERS = {
 }
 
 
+# FastAPI's auto-generated docs pages load Swagger UI / ReDoc bundles from
+# cdn.jsdelivr.net. Applying our SPA CSP would block them. These paths are
+# dev-only; the SPA's CSP is what we actually care about.
+_DOCS_PATHS = ("/docs", "/redoc", "/openapi.json")
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         response: Response = await call_next(request)
-        # Apply CSP/X-Frame to HTML responses; the API endpoints don't need
-        # CSP but the extra X-Content-Type-Options is cheap insurance.
+        path = request.url.path
+        if path in _DOCS_PATHS or path.startswith("/docs/") or path.startswith("/redoc/"):
+            response.headers.setdefault("X-Content-Type-Options", "nosniff")
+            return response
         ctype = response.headers.get("content-type", "")
         if "text/html" in ctype:
             for k, v in _HTML_HEADERS.items():

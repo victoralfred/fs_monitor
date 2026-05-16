@@ -6,8 +6,20 @@ import { Detail } from './detail.jsx';
 import { TimelinePane } from './timeline.jsx';
 import { NetworkPane } from './network.jsx';
 import { ErrorBoundary } from './error-boundary.jsx';
+import { Splitter } from './splitter.jsx';
+import { Footer } from './footer.jsx';
 import { applyDiff, buildTree } from './tree-builder.js';
 import './styles.css';
+
+const MIN_LEFT_PX = 280;
+const MIN_RIGHT_PX = 320;
+const DEFAULT_LEFT_RATIO = 0.4;
+
+function readSavedWidth() {
+  const raw = localStorage.getItem('monitor.leftWidth');
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
 
 const NEW_MS = 2000;
 const GONE_MS = 1500;
@@ -129,6 +141,39 @@ function App() {
   const [showKthreads, setShowKthreads] = useState(false);
   const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [pane, setPane] = useState('tree'); // 'tree' | 'timeline' | 'network'
+  const [leftWidth, setLeftWidth] = useState(
+    () => readSavedWidth() ?? Math.round(window.innerWidth * DEFAULT_LEFT_RATIO),
+  );
+  // Clamp + persist on every change. Listener on window resize keeps
+  // the pane usable even after the user makes the window narrower.
+  const clampWidth = (w) => Math.max(MIN_LEFT_PX, Math.min(window.innerWidth - MIN_RIGHT_PX, w));
+  useEffect(() => {
+    localStorage.setItem('monitor.leftWidth', String(leftWidth));
+  }, [leftWidth]);
+  useEffect(() => {
+    const onResize = () => setLeftWidth((w) => clampWidth(w));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  // Best-effort live read of eBPF state for the footer pill. Polled
+  // every 5 s so the footer never goes stale for long.
+  const [ebpfRunning, setEbpfRunning] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    const tick = () =>
+      fetch('/api/timeline')
+        .then((r) => r.json())
+        .then((d) => {
+          if (!cancelled) setEbpfRunning(!!d.ebpf_running);
+        })
+        .catch(() => {});
+    tick();
+    const t = setInterval(tick, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, []);
   const [dark, setDark] = useState(() => localStorage.getItem('monitor.dark') === '1');
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
@@ -173,88 +218,92 @@ function App() {
           {paranoid.hidden_pids.length > 10 ? ', …' : ''}
         </div>
       )}
-      <div class="layout">
-        <div class="pane">
-          {pane === 'timeline' ? (
-            <TimelinePane onClose={() => setPane('tree')} />
-          ) : pane === 'network' ? (
-            <NetworkPane
-              onClose={() => setPane('tree')}
-              onSelect={(p) => {
-                setSelected(p);
-                setPane('tree');
-              }}
-            />
-          ) : (
-            <>
-              <div class="toolbar">
-                <input
-                  placeholder="filter pid / name / user"
-                  value={query}
-                  onInput={(e) => setQuery(e.currentTarget.value)}
-                />
-                <label class="toggle" title="Show kernel threads (children of pid 2)">
-                  <input
-                    type="checkbox"
-                    checked={showKthreads}
-                    onChange={(e) => setShowKthreads(e.currentTarget.checked)}
-                  />{' '}
-                  kthreads
-                </label>
-                <label class="toggle" title="Show only processes with active security flags">
-                  <input
-                    type="checkbox"
-                    checked={flaggedOnly}
-                    onChange={(e) => setFlaggedOnly(e.currentTarget.checked)}
-                  />{' '}
-                  flagged only
-                </label>
-                <button
-                  class="theme-btn"
-                  onClick={() => setPane('timeline')}
-                  title="Show exec timeline"
-                >
-                  ⏱
-                </button>
-                <button
-                  class="theme-btn"
-                  onClick={() => setPane('network')}
-                  title="Show external network connections"
-                >
-                  🌐
-                </button>
-                <button
-                  class="theme-btn"
-                  onClick={() => setDark((d) => !d)}
-                  title="Toggle dark mode"
-                >
-                  {dark ? '☀' : '☾'}
-                </button>
-                <span
-                  class={`lag${lag != null && lag > 500 ? ' over' : ''}`}
-                  title={
-                    lag != null && lag > 500
-                      ? `Scanner over 500 ms budget (${lag} ms)`
-                      : 'Scan duration of last tick'
-                  }
-                >
-                  {lag != null ? `${lag} ms` : '…'}
-                </span>
-              </div>
-              <Tree
-                tree={tree}
-                recentNew={recentNew}
-                recentGone={recentGone}
-                recentExec={recentExec}
-                selected={selected}
-                onSelect={setSelected}
+      <div class="app-shell">
+        <div class="layout" style={{ gridTemplateColumns: `${leftWidth}px 6px 1fr` }}>
+          <div class="pane">
+            {pane === 'timeline' ? (
+              <TimelinePane onClose={() => setPane('tree')} />
+            ) : pane === 'network' ? (
+              <NetworkPane
+                onClose={() => setPane('tree')}
+                onSelect={(p) => {
+                  setSelected(p);
+                  setPane('tree');
+                }}
               />
-            </>
-          )}
+            ) : (
+              <>
+                <div class="toolbar">
+                  <input
+                    placeholder="filter pid / name / user"
+                    value={query}
+                    onInput={(e) => setQuery(e.currentTarget.value)}
+                  />
+                  <label class="toggle" title="Show kernel threads (children of pid 2)">
+                    <input
+                      type="checkbox"
+                      checked={showKthreads}
+                      onChange={(e) => setShowKthreads(e.currentTarget.checked)}
+                    />{' '}
+                    kthreads
+                  </label>
+                  <label class="toggle" title="Show only processes with active security flags">
+                    <input
+                      type="checkbox"
+                      checked={flaggedOnly}
+                      onChange={(e) => setFlaggedOnly(e.currentTarget.checked)}
+                    />{' '}
+                    flagged only
+                  </label>
+                  <button
+                    class="theme-btn"
+                    onClick={() => setPane('timeline')}
+                    title="Show exec timeline"
+                  >
+                    ⏱
+                  </button>
+                  <button
+                    class="theme-btn"
+                    onClick={() => setPane('network')}
+                    title="Show external network connections"
+                  >
+                    🌐
+                  </button>
+                  <button
+                    class="theme-btn"
+                    onClick={() => setDark((d) => !d)}
+                    title="Toggle dark mode"
+                  >
+                    {dark ? '☀' : '☾'}
+                  </button>
+                  <span
+                    class={`lag${lag != null && lag > 500 ? ' over' : ''}`}
+                    title={
+                      lag != null && lag > 500
+                        ? `Scanner over 500 ms budget (${lag} ms)`
+                        : 'Scan duration of last tick'
+                    }
+                  >
+                    {lag != null ? `${lag} ms` : '…'}
+                  </span>
+                </div>
+                <Tree
+                  tree={tree}
+                  recentNew={recentNew}
+                  recentGone={recentGone}
+                  recentExec={recentExec}
+                  selected={selected}
+                  onSelect={setSelected}
+                />
+              </>
+            )}
+          </div>
+          <Splitter onResize={(x) => setLeftWidth(clampWidth(x))} />
+          <div class="pane">
+            <Detail pid={selected} />
+          </div>
         </div>
-        <div class="pane">
-          <Detail pid={selected} />
-        </div>
+        <Footer ebpfRunning={ebpfRunning} />
       </div>
     </ProcStreamCtx.Provider>
   );

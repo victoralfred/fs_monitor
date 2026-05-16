@@ -11,9 +11,8 @@ from typing import Any
 
 import psutil
 
-from .history import HISTORY, ExecEvent
+from .history import ExecEvent
 from .metrics import SCAN_DURATION
-from .netwatch import CONNECTIONS
 from .netwatch import scan as netwatch_scan
 from .security import (
     SecurityConfig,
@@ -39,7 +38,7 @@ class Diff:
     execed: list[int]      # pids whose cmdline changed (exec without fork)
 
 
-def _snapshot() -> dict[int, ProcDict]:
+def _snapshot(state) -> dict[int, ProcDict]:
     out: dict[int, ProcDict] = {}
     attrs = [
         "pid",
@@ -62,8 +61,9 @@ def _snapshot() -> dict[int, ProcDict]:
             name = info["name"] or ""
             started = float(info["create_time"] or 0.0)
             flags = compute_flags(
-                pid, name, ppid, SECURITY_CFG,
+                pid, name, ppid, state.security_cfg,
                 cmdline=cmdline, start_time=started,
+                connections=state.connections, fs=state.fs,
             )
             out[pid] = {
                 "pid": pid,
@@ -88,27 +88,28 @@ def _public(p: ProcDict) -> ProcDict:
     return {k: v for k, v in p.items() if not k.startswith("_")}
 
 
-def _scan_and_finalize(prev: dict[int, ProcDict]):
+def _scan_and_finalize(state, prev: dict[int, ProcDict]):
     """Worker-thread entrypoint: take a fresh snapshot, diff against `prev`,
     update history, recompute flags for execed pids. Returns the new
     snapshot plus pre-stripped public lists ready for broadcast.
     """
-    new = _snapshot()
+    new = _snapshot(state)
     diff = _diff(prev, new)
     live_pids = set(new.keys())
+    history = state.history
+    fs = state.fs
+    cfg = state.security_cfg
 
     # Sparkline samples + history pruning.
     for pid, row in new.items():
-        HISTORY.record(pid, row["cpu"], row["rss"])
+        history.record(pid, row["cpu"], row["rss"])
     if diff.removed:
-        HISTORY.prune(live_pids)
-        # Phase 10 A3: drop FS-window state for dead pids too.
-        from .fswatch import FS
-        FS.prune_pids(live_pids)
+        history.prune(live_pids)
+        fs.prune_pids(live_pids)
 
     # Timeline exec log.
     for row in diff.added:
-        HISTORY.add_exec(ExecEvent(
+        history.add_exec(ExecEvent(
             at=row["started"] or time.time(),
             pid=row["pid"], ppid=row["ppid"],
             name=row["name"], exe=None, cmd=row["cmd"],
@@ -117,7 +118,7 @@ def _scan_and_finalize(prev: dict[int, ProcDict]):
     for pid in diff.execed:
         row = new.get(pid)
         if row:
-            HISTORY.add_exec(ExecEvent(
+            history.add_exec(ExecEvent(
                 at=time.time(), pid=pid, ppid=row["ppid"],
                 name=row["name"], exe=None, cmd=row["cmd"],
                 source="scanner",
@@ -126,16 +127,17 @@ def _scan_and_finalize(prev: dict[int, ProcDict]):
     # B3: drop cached environ for execed/dead pids, then re-run flags
     # for execed pids with the fresh environ.
     for pid in diff.execed:
-        invalidate_env_cache(SECURITY_CFG, pid)
+        invalidate_env_cache(cfg, pid)
     if diff.removed:
-        prune_env_cache(SECURITY_CFG, live_pids)
+        prune_env_cache(cfg, live_pids)
     for pid in diff.execed:
         row = new.get(pid)
         if row is None:
             continue
         fresh = compute_flags(
-            pid, row["name"], row["ppid"], SECURITY_CFG,
+            pid, row["name"], row["ppid"], cfg,
             cmdline=row["cmd"].split(" "), start_time=row["started"],
+            connections=state.connections, fs=fs,
         )
         row["flags"] = [f["id"] for f in fresh]
         row["_flag_detail"] = fresh
@@ -173,7 +175,10 @@ def _diff(old: dict[int, ProcDict], new: dict[int, ProcDict]) -> Diff:
 
 
 class Scanner:
-    def __init__(self, interval: float = 2.0, scan_timeout: float = 10.0) -> None:
+    def __init__(self, state, interval: float = 2.0, scan_timeout: float = 10.0) -> None:
+        # `state` is an AppState — typed via duck-typing rather than the
+        # import to avoid a cycle (state.py imports Scanner via TYPE_CHECKING).
+        self.state = state
         self.interval = interval
         self.scan_timeout = scan_timeout
         self.snapshot: dict[int, ProcDict] = {}
@@ -238,7 +243,7 @@ class Scanner:
                 # T2: do all post-snapshot work in the worker, then assign atomically.
                 prev = self.snapshot
                 new, diff, public_added, public_changed = await asyncio.wait_for(
-                    asyncio.to_thread(_scan_and_finalize, prev),
+                    asyncio.to_thread(_scan_and_finalize, self.state, prev),
                     timeout=self.scan_timeout,
                 )
                 self.snapshot = new
@@ -264,7 +269,8 @@ class Scanner:
                 log.exception("scanner tick failed")
             await asyncio.sleep(max(0.0, self.interval - (time.monotonic() - t0)))
 
-    async def _run_netwatch(self) -> None:
+    async def _run_netwatch(self) -> None:  # noqa: D401
+        connections = self.state.connections
         """Periodic egress scan with adaptive back-off.
 
         Default cadence is 1 s — tight enough to catch most short-lived
@@ -283,8 +289,8 @@ class Scanner:
             try:
                 name_lookup = {p: r["name"] for p, r in self.snapshot.items()}
                 conns = await asyncio.to_thread(netwatch_scan, name_lookup)
-                CONNECTIONS.update(conns)
-                CONNECTIONS.prune()
+                connections.update(conns)
+                connections.prune()
                 self.last_netwatch_at = time.time()
             except Exception:
                 self.netwatch_error_count += 1
@@ -296,12 +302,12 @@ class Scanner:
                 interval = max(base, interval * 0.5)
 
     async def _run_paranoid(self) -> None:
-        """B7 background sweep — only active when SECURITY_CFG.paranoid is True.
+        """B7 background sweep — only active when cfg.paranoid is True.
         Runs every 10 s so it doesn't compete with the main scan tick.
         """
         while True:
             await asyncio.sleep(10.0)
-            if not SECURITY_CFG.paranoid:
+            if not self.state.security_cfg.paranoid:
                 continue
             try:
                 live = set(self.snapshot.keys())
@@ -314,7 +320,7 @@ class Scanner:
 
     async def start(self) -> None:
         if self._task is None:
-            self.snapshot = await asyncio.to_thread(_snapshot)
+            self.snapshot = await asyncio.to_thread(_snapshot, self.state)
             self._task = asyncio.create_task(self._run(), name="scanner")
             self._paranoid_task = asyncio.create_task(
                 self._run_paranoid(), name="scanner-paranoid"
