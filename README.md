@@ -36,7 +36,7 @@ and [CHANGELOG.md](CHANGELOG.md) for what's shipped.
   `tcp_connect` tracepoint catches sub-second connections that polling
   misses. Lives in a 10-minute rolling log so curl-and-exit still
   shows up.
-- **Filesystem burst detection** - eBPF probes on `openat` (with
+- **Filesystem burst detection** — eBPF probes on `openat` (with
   O_CREAT/O_TRUNC) and `unlinkat` fire flags for processes overwriting
   or deleting files at malware-payload rates.
 
