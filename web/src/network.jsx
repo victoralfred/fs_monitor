@@ -74,6 +74,16 @@ export function NetworkPane({ onClose, onSelect }) {
             <span class="addr">
               {c.laddr || '—'} → <strong>{c.raddr}</strong>
               {c.external && <span class="ext-pill">external</span>}
+              {(c.ptr || c.asn_org) && (
+                <span class="enrich">
+                  {c.asn_org && (
+                    <span class="asn" title={c.asn ? `AS${c.asn}` : ''}>
+                      {c.asn_org}
+                    </span>
+                  )}
+                  {c.ptr && <span class="ptr">{c.ptr}</span>}
+                </span>
+              )}
             </span>
             <span class="state">{c.state || ''}</span>
             <span class="ts" title={`first ${fmt(c.first_seen)}`}>

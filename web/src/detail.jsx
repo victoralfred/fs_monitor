@@ -10,6 +10,8 @@ const FLAG_LABELS = {
   argv_exe_mismatch: 'argv[0] does not match exe (possible masquerade)',
   dangerous_env: 'Dangerous environment variable set (LD_PRELOAD / LD_AUDIT)',
   external_egress_from_suspicious: 'Suspicious-path exe is talking to the internet',
+  fs_write_burst: 'Burst of file writes (possible overwrite payload)',
+  fs_mass_delete: 'Mass file deletion (possible wiper)',
 };
 
 function SecurityTab({ flags }) {
@@ -62,6 +64,7 @@ export function Detail({ pid }) {
   const [showEnv, setShowEnv] = useState(false);
   // Seeded by one history fetch on selection; appended via WS rows.
   const [history, setHistory] = useState([]);
+  const [fetchError, setFetchError] = useState(null); // null | "not_found" | string
   const lastSampleAt = useRef(0);
   const [killState, setKillState] = useState({ sig: 'SIGTERM', confirming: false, msg: '' });
 
@@ -70,13 +73,29 @@ export function Detail({ pid }) {
   useEffect(() => {
     if (pid == null) {
       setData(null);
+      setFetchError(null);
       return;
     }
     let cancelled = false;
+    setFetchError(null);
+    setData(null);
     fetch(`/api/processes/${pid}`)
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => {
+        if (r.status === 404) {
+          if (!cancelled) setFetchError('not_found');
+          return null;
+        }
+        if (!r.ok) {
+          if (!cancelled) setFetchError(`http_${r.status}`);
+          return null;
+        }
+        return r.json();
+      })
       .then((d) => {
-        if (!cancelled) setData(d);
+        if (!cancelled && d) setData(d);
+      })
+      .catch((e) => {
+        if (!cancelled) setFetchError(`network: ${e.message}`);
       });
     return () => {
       cancelled = true;
@@ -155,6 +174,19 @@ export function Detail({ pid }) {
   }, [data, libFilter]);
 
   if (pid == null) return <div class="empty">Select a process on the left.</div>;
+  if (fetchError === 'not_found')
+    return (
+      <div class="empty">
+        Process <strong>#{pid}</strong> has exited. It existed when the tree last refreshed but is
+        gone now — pick another row.
+      </div>
+    );
+  if (fetchError)
+    return (
+      <div class="empty">
+        Failed to load process #{pid}: <code>{fetchError}</code>
+      </div>
+    );
   if (!data) return <div class="empty">Loading pid {pid}…</div>;
 
   const view = merged || data;

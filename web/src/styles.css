@@ -139,6 +139,9 @@ table.fds th { color: var(--muted); font-weight: 500; }
 .conn-row .addr strong { color: var(--accent); }
 .ext-pill { display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 3px; background: #fee2e2; color: #991b1b; font-size: 10px; }
 :root[data-theme="dark"] .ext-pill { background: #5b1f1f; color: #fecaca; }
+.enrich { display: block; margin-top: 2px; font-size: 11px; color: var(--muted); }
+.enrich .asn { color: var(--accent); margin-right: 8px; }
+.enrich .ptr { font-style: italic; }
 .conn-row .src.tcp, .conn-row .src.tcp6 { background: #dbeafe; color: #1d4ed8; }
 .conn-row .src.udp, .conn-row .src.udp6 { background: #fef3c7; color: #92400e; }
 :root[data-theme="dark"] .conn-row .src.tcp,

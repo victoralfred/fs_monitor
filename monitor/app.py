@@ -150,6 +150,7 @@ def create_app(
             "exe_suspicious_path", "exe_deleted", "exe_memfd",
             "kthread_impersonation", "argv_exe_mismatch", "dangerous_env",
             "external_egress_from_suspicious",
+            "fs_write_burst", "fs_mass_delete",
         ):
             FLAGS_FIRING.labels(flag=fid).set(flag_counts.get(fid, 0))
         return PlainTextResponse(
