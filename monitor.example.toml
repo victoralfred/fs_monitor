@@ -61,6 +61,16 @@ paranoid = true
 allow_kill = false
 kill_acl = "same_user"
 
+[enrichment]
+# Reverse DNS happens for free using the system resolver. ASN lookup
+# needs a GeoLite2-ASN.mmdb file from MaxMind (free, requires signup).
+# Drop the file at one of these paths and `pip install maxminddb`:
+#   $MONITOR_ASN_DB
+#   ~/.local/share/monitor/GeoLite2-ASN.mmdb
+#   /var/lib/monitor/GeoLite2-ASN.mmdb
+#   /usr/share/GeoIP/GeoLite2-ASN.mmdb
+# Without the DB, the Network panel shows PTR records only.
+
 [ebpf]
 # Phase 6 #4: spawn bpftrace to capture execve events in real time and
 # merge them into the timeline. Requires bpftrace on PATH and CAP_BPF +

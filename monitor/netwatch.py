@@ -62,6 +62,10 @@ class Conn:
     external: bool
     first_seen: float
     last_seen: float
+    # A2 enrichment — populated lazily after first sighting.
+    ptr: str | None = None
+    asn: int | None = None
+    asn_org: str | None = None
 
 
 @dataclass
@@ -72,6 +76,10 @@ class ConnectionLog:
     _lock: Lock = field(default_factory=Lock, repr=False, compare=False)
 
     def update(self, conns: list[Conn]) -> None:
+        # Import here to avoid a circular dep at module load (enrichment
+        # is independent but imported by app.py too).
+        from .enrichment import ENRICHER
+
         now = time.time()
         with self._lock:
             for c in conns:
@@ -83,9 +91,14 @@ class ConnectionLog:
                     self.seen[key] = c
                 else:
                     existing.last_seen = now
-                    # Drift in state field is interesting; pid/raddr/proto are
-                    # the key so they can't drift.
                     existing.state = c.state
+        # Outside the lock: kick enrichment for the remote IPs we just saw.
+        # First call returns empty; the background lookup populates the
+        # cache. The next CONNECTIONS.items() call picks the enrichment up.
+        for c in conns:
+            if c.external:
+                ip = c.raddr.split(":", 1)[0].strip("[]")
+                ENRICHER.enrich(ip)
 
     def prune(self) -> None:
         now = time.time()
@@ -95,10 +108,20 @@ class ConnectionLog:
                     del self.seen[key]
 
     def items(self, external_only: bool = True) -> list[dict]:
+        from .enrichment import ENRICHER
+
         with self._lock:
             rows = [asdict(c) for c in self.seen.values()]
         if external_only:
             rows = [r for r in rows if r["external"]]
+        # Attach the latest enrichment snapshot just before serializing.
+        for r in rows:
+            if r["external"]:
+                ip = r["raddr"].split(":", 1)[0].strip("[]")
+                e = ENRICHER.enrich(ip)
+                r["ptr"] = e.ptr
+                r["asn"] = e.asn
+                r["asn_org"] = e.asn_org
         rows.sort(key=lambda r: r["last_seen"], reverse=True)
         return rows
 
